@@ -2,10 +2,9 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import cv2
-from pyzbar.pyzbar import decode
-import tempfile
 import os
 
+st.set_page_config(page_title="QR Attendance Scanner", layout="centered")
 st.title("📷 QR Code Scanner for Student Attendance")
 
 # Load or create CSV
@@ -17,28 +16,38 @@ else:
 
 # Button to start scanning
 if st.button("Start Scanning"):
-    st.info("Press 'q' to stop scanning.")
+    st.info("Press 'q' in the scanner window to stop scanning.")
+
     cap = cv2.VideoCapture(0)
+    detector = cv2.QRCodeDetector()
 
     while True:
         ret, frame = cap.read()
-        for code in decode(frame):
-            qr_data = code.data.decode('utf-8')
-            parts = dict(part.strip().split(": ", 1) for part in qr_data.split(", "))
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if not ret:
+            st.error("Failed to access webcam.")
+            break
 
-            row = {
-                "Name": parts.get("Name", ""),
-                "Roll Number": parts.get("Roll", ""),
-                "Semester": parts.get("Semester", ""),
-                "Class": parts.get("Class", ""),
-                "Batch": parts.get("Batch", ""),
-                "Timestamp": timestamp
-            }
+        data, bbox, _ = detector.detectAndDecode(frame)
+        if bbox is not None and data:
+            try:
+                parts = dict(part.strip().split(": ", 1) for part in data.split(", "))
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-            st.success(f"Scanned: {row['Name']} ({row['Roll Number']})")
-            df.to_csv(csv_file, index=False)
+                row = {
+                    "Name": parts.get("Name", ""),
+                    "Roll Number": parts.get("Roll", ""),
+                    "Semester": parts.get("Semester", ""),
+                    "Class": parts.get("Class", ""),
+                    "Batch": parts.get("Batch", ""),
+                    "Timestamp": timestamp
+                }
+
+                if not ((df["Roll Number"] == row["Roll Number"]) & (df["Timestamp"] == row["Timestamp"])).any():
+                    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+                    df.to_csv(csv_file, index=False)
+                    st.success(f"✅ Scanned: {row['Name']} ({row['Roll Number']}) at {timestamp}")
+            except Exception as e:
+                st.warning(f"Could not parse QR data: {e}")
 
         cv2.imshow("Scan QR - Press q to quit", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -47,5 +56,6 @@ if st.button("Start Scanning"):
     cap.release()
     cv2.destroyAllWindows()
 
+# Show current log
 st.subheader("📄 Attendance Log")
 st.dataframe(df)
